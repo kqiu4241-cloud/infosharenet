@@ -3,7 +3,12 @@ import axios from 'axios'
 // 创建 axios 实例
 const request = axios.create({
   baseURL: 'http://192.168.187.135:5000', // 后端 Flask 或 FastAPI 服务地址
-  timeout: 5000
+  timeout: 5000,
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  // ✅ 允许跨域携带 cookie（如果需要）
+  withCredentials: false
 })
 
 // 请求拦截器
