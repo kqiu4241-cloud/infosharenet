@@ -1,8 +1,9 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from urllib.parse import unquote
+from urllib.parse import unquote,quote
 import os, json
+from sqlalchemy import or_, func
 
 app = Flask(__name__)
 CORS(app)
@@ -129,7 +130,67 @@ def download_file(filepath):
     if not os.path.exists(abs_path):
         return jsonify({'error': f'File not found: {abs_path}'}), 404
 
-    return send_file(abs_path, as_attachment=True)
+    return send_file(
+        abs_path,
+        as_attachment=True,
+        download_name=os.path.basename(abs_path),
+        mimetype='application/octet-stream'
+    )
+
+
+@app.route('/files/search', methods=['GET'])
+def search_files():
+    """
+    GET /files/search?keyword=xxx[&category=basic|research|job][&major=信息工程]
+    返回：一个数组，每个元素 { name, major, category, url }
+    url 是完整可点击下载链接（已做 quote 编码）
+    """
+    keyword = request.args.get('keyword', '').strip()
+    category = request.args.get('category', '').strip()
+    major = request.args.get('major', '').strip()
+
+    if not keyword:
+        return jsonify({'error': 'Missing keyword'}), 400
+
+    # 不区分大小写模糊匹配文件名
+    query = File.query.filter(func.lower(File.filename).like(f"%{keyword.lower()}%"))
+    if category:
+        query = query.filter_by(category=category)
+    if major:
+        query = query.filter_by(major=major)
+
+    results = query.all()
+    found_files = []
+    removed = []
+
+    for f in results:
+        # 若文件已被物理删除，记录待删除并跳过
+        if not os.path.exists(f.filepath):
+            removed.append(f)
+            continue
+
+        # URL encode 各个 path component
+        major_q = quote(f.major, safe='')
+        category_q = quote(f.category, safe='')
+        filename_q = quote(f.filename, safe='')
+
+        download_url = f"{request.host_url.rstrip('/')}/download/{major_q}/{category_q}/{filename_q}"
+
+        found_files.append({
+            'name': f.filename,
+            'major': f.major,
+            'category': f.category,
+            'url': f'http://192.168.187.135:5000/download/{f.major}/{f.category}/{f.filename}'
+        })
+
+    # 自动删除 DB 中对应不到文件的记录
+    if removed:
+        for r in removed:
+            db.session.delete(r)
+        db.session.commit()
+
+    return jsonify(found_files)
+
 
 
 # ====================== 启动应用 ======================
