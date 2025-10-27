@@ -24,6 +24,7 @@ const login = async () => {
       password: password.value
     })
     localStorage.setItem('token', res.token)
+    localStorage.setItem('user', JSON.stringify(res.user))  // ✅ 存储用户信息
     alert('登录成功！')
     router.push('/home')
   } catch {

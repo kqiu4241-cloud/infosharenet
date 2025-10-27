@@ -8,9 +8,13 @@
       <div v-if="files.basic.length === 0">暂无文件</div>
       <div class="file-list">
         <div v-for="f in files.basic" :key="f.name" class="file-box">
-          <a :href="`${backendBase}${f.url}`" target="_blank">{{ f.name }}</a>
+          <a :href="encodeURI(f.url)" target="_blank" rel="noopener noreferrer" @click.stop>{{ f.name }}</a>
+
+          <!-- 🗑 删除按钮，只在已登录时显示 -->
+          <button v-if="isLoggedIn" class="delete-btn" @click="deleteFile(f.id)">🗑 删除</button>
         </div>
       </div>
+
     </div>
 
     <!-- 保研信息 -->
@@ -19,7 +23,9 @@
       <div v-if="files.research.length === 0">暂无文件</div>
       <div class="file-list">
         <div v-for="f in files.research" :key="f.name" class="file-box">
-          <a :href="`${backendBase}${f.url}`" target="_blank">{{ f.name }}</a>
+          <a :href="encodeURI(f.url)" target="_blank" rel="noopener noreferrer" @click.stop>{{ f.name }}</a>
+          <!-- 🗑 删除按钮，只在已登录时显示 -->
+          <button v-if="isLoggedIn" class="delete-btn" @click="deleteFile(f.id)">🗑 删除</button>
         </div>
       </div>
     </div>
@@ -30,7 +36,9 @@
       <div v-if="files.job.length === 0">暂无文件</div>
       <div class="file-list">
         <div v-for="f in files.job" :key="f.name" class="file-box">
-          <a :href="`${backendBase}${f.url}`" target="_blank">{{ f.name }}</a>
+          <a :href="encodeURI(f.url)" target="_blank" rel="noopener noreferrer" @click.stop>{{ f.name }}</a>
+          <!-- 🗑 删除按钮，只在已登录时显示 -->
+          <button v-if="isLoggedIn" class="delete-btn" @click="deleteFile(f.id)">🗑 删除</button>
         </div>
   </div>
 </div>
@@ -128,6 +136,19 @@ const searchFiles = async () => {
   }
 }
 
+const deleteFile = async (id) => {
+  if (!confirm('确定要删除这个文件吗？')) return
+  try {
+    await request.delete(`/files/delete/${id}`)
+    alert('删除成功！')
+    // 重新加载文件列表
+    await loadFiles()
+  } catch (err) {
+    console.error('删除失败：', err)
+    alert('删除失败，可能没有权限或文件不存在')
+  }
+}
+
 
 onMounted(loadFiles)
 </script>
@@ -215,5 +236,18 @@ onMounted(loadFiles)
   color: #888;
   margin-left: 10px;
 }
+.delete-btn {
+  margin-left: 10px;
+  background-color: #ff4d4f;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.delete-btn:hover {
+  background-color: #d9363e;
+}
+
 
 </style>
