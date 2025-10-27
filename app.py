@@ -1,10 +1,12 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from urllib.parse import unquote,quote
-import os, json
-from sqlalchemy import or_, func
+from urllib.parse import unquote, quote
+import os
+from sqlalchemy import func
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 
+# ====================== 初始化 Flask 应用 ======================
 app = Flask(__name__)
 CORS(app)
 
@@ -12,6 +14,14 @@ CORS(app)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://infouser:123456@localhost/infoshare'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
+
+# ====================== JWT 配置 ======================
+app.config['JWT_SECRET_KEY'] = 'your-secret-key'
+app.config['JWT_TOKEN_LOCATION'] = ['headers']
+app.config['JWT_HEADER_NAME'] = 'Authorization'
+app.config['JWT_HEADER_TYPE'] = 'Bearer'
+
+jwt = JWTManager(app)
 
 # ====================== 模型定义 ======================
 class User(db.Model):
@@ -38,11 +48,17 @@ with app.app_context():
 # ====================== 用户接口 ======================
 @app.route('/auth/login', methods=['POST'])
 def login():
-    data = request.json
-    user = User.query.filter_by(username=data['username']).first()
-    if user and user.password == data['password']:
-        return jsonify({'token': 'mock-token', 'username': user.username})
-    return jsonify({'error': 'Invalid credentials'}), 401
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+
+    # 示例逻辑：验证用户名密码
+    if username == 'admin' and password == '123456':
+        token = create_access_token(identity=username)
+        return jsonify({'token': token, 'message': '登录成功'})
+    else:
+        return jsonify({'message': '用户名或密码错误'}), 401
+
 
 @app.route('/auth/register', methods=['POST'])
 def register():
@@ -55,23 +71,26 @@ def register():
     return jsonify({'message': 'Registered successfully'})
 
 # ====================== 文件接口 ======================
-
-# 上传文件接口
 @app.route('/upload', methods=['POST'])
+@jwt_required()
 def upload_file_main():
+    current_user = get_jwt_identity()
+    uploader = current_user
+
     if 'file' not in request.files:
-        return jsonify({'error': 'No file found'}), 400
+        return jsonify({'message': '没有上传文件'}), 400
 
     file = request.files['file']
+    if file.filename == '':
+        return jsonify({'message': '未选择文件'}), 400
+
     major = request.form.get('major')
     category = request.form.get('category')
-    uploader = request.form.get('uploader', 'Anonymous')
 
     save_dir = os.path.join(UPLOAD_FOLDER, major, category)
     os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, file.filename)
 
-    # ✅ 检查数据库中是否已存在该文件记录
     existing = File.query.filter_by(filename=file.filename, major=major, category=category).first()
     if existing:
         return jsonify({'error': '文件已存在，请勿重复上传'}), 400
@@ -88,30 +107,31 @@ def upload_file_main():
     db.session.add(new_file)
     db.session.commit()
 
-    return jsonify({'message': 'File uploaded successfully', 'filename': file.filename})
+    return jsonify({
+        'message': f'文件上传成功 by {uploader}',
+        'filename': file.filename
+    })
 
 
-# 获取某专业下所有文件分类
 @app.route('/files/<major>', methods=['GET'])
 def get_files_by_major(major):
     result = {'basic': [], 'research': [], 'job': []}
-
     files = File.query.filter_by(major=major).all()
-    removed = []  # 用于记录删除的无效记录
+    removed = []
 
     for f in files:
         if not os.path.exists(f.filepath):
             removed.append(f)
-            continue  # 跳过已丢失的文件
+            continue
 
-        url = f'/download/{f.major}/{f.category}/{f.filename}'
+        url = f'http://192.168.187.135:5000/download/{quote(f.major)}/{quote(f.category)}/{quote(f.filename)}'
         if f.category in result:
             result[f.category].append({
+                'id': f.id,
                 'name': f.filename,
                 'url': url
             })
 
-    # ✅ 清理数据库中已不存在的文件记录
     if removed:
         for r in removed:
             db.session.delete(r)
@@ -121,7 +141,6 @@ def get_files_by_major(major):
     return jsonify(result)
 
 
-# 下载文件接口（支持中文文件名）
 @app.route('/download/<path:filepath>', methods=['GET'])
 def download_file(filepath):
     decoded_path = unquote(filepath)
@@ -138,12 +157,32 @@ def download_file(filepath):
     )
 
 
+@app.route('/files/delete/<int:file_id>', methods=['DELETE'])
+@jwt_required()
+def delete_file(file_id):
+    current_user = get_jwt_identity()
+    file = File.query.get(file_id)
+
+    if not file:
+        return jsonify({'error': 'File not found'}), 404
+
+    if file.uploader != current_user:
+        return jsonify({'error': 'You do not have permission to delete this file'}), 403
+
+    if os.path.exists(file.filepath):
+        os.remove(file.filepath)
+
+    db.session.delete(file)
+    db.session.commit()
+
+    return jsonify({'message': 'File deleted successfully'})
+
+
 @app.route('/files/search', methods=['GET'])
 def search_files():
     """
     GET /files/search?keyword=xxx[&category=basic|research|job][&major=信息工程]
     返回：一个数组，每个元素 { name, major, category, url }
-    url 是完整可点击下载链接（已做 quote 编码）
     """
     keyword = request.args.get('keyword', '').strip()
     category = request.args.get('category', '').strip()
@@ -152,7 +191,6 @@ def search_files():
     if not keyword:
         return jsonify({'error': 'Missing keyword'}), 400
 
-    # 不区分大小写模糊匹配文件名
     query = File.query.filter(func.lower(File.filename).like(f"%{keyword.lower()}%"))
     if category:
         query = query.filter_by(category=category)
@@ -164,26 +202,22 @@ def search_files():
     removed = []
 
     for f in results:
-        # 若文件已被物理删除，记录待删除并跳过
         if not os.path.exists(f.filepath):
             removed.append(f)
             continue
 
-        # URL encode 各个 path component
         major_q = quote(f.major, safe='')
         category_q = quote(f.category, safe='')
         filename_q = quote(f.filename, safe='')
 
-        download_url = f"{request.host_url.rstrip('/')}/download/{major_q}/{category_q}/{filename_q}"
-
         found_files.append({
+            'id': f.id,
             'name': f.filename,
             'major': f.major,
             'category': f.category,
             'url': f'http://192.168.187.135:5000/download/{f.major}/{f.category}/{f.filename}'
         })
 
-    # 自动删除 DB 中对应不到文件的记录
     if removed:
         for r in removed:
             db.session.delete(r)
@@ -192,9 +226,7 @@ def search_files():
     return jsonify(found_files)
 
 
-
 # ====================== 启动应用 ======================
 if __name__ == '__main__':
-    # 用 0.0.0.0 让局域网可访问
     app.run(host='0.0.0.0', port=5000, debug=True)
 
