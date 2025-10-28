@@ -5,7 +5,7 @@ from urllib.parse import unquote, quote
 import os
 from sqlalchemy import func
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-
+from werkzeug.security import generate_password_hash, check_password_hash #哈希函数
 # ====================== 初始化 Flask 应用 ======================
 app = Flask(__name__)
 CORS(app)
@@ -27,7 +27,7 @@ jwt = JWTManager(app)
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(64), unique=True)
-    password = db.Column(db.String(128))
+    password = db.Column(db.String(512))
 
 class File(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -45,30 +45,37 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 with app.app_context():
     db.create_all()
 
+@app.route('/auth/register', methods=['POST'])
+def register():
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    # 参数检查
+    if not username or not password:
+        return jsonify({'error': '用户名和密码不能为空'}), 400
+    if User.query.filter_by(username=username).first():
+        return jsonify({'error': 'User already exists'}), 400
+    # ✅ 密码加密（默认使用 pbkdf2:sha256）
+    hashed_password = generate_password_hash(password)
+    # 存入数据库
+    new_user = User(username=username, password=hashed_password)
+    db.session.add(new_user)
+    db.session.commit()
+    return jsonify({'message': 'Registered successfully'})
+
 # ====================== 用户接口 ======================
 @app.route('/auth/login', methods=['POST'])
 def login():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
-
-    # 示例逻辑：验证用户名密码
-    if username == 'admin' and password == '123456':
+    user = User.query.filter_by(username=username).first()
+    # 验证用户存在 + 密码匹配
+    if user and check_password_hash(user.password, password):
         token = create_access_token(identity=username)
         return jsonify({'token': token, 'message': '登录成功'})
     else:
         return jsonify({'message': '用户名或密码错误'}), 401
-
-
-@app.route('/auth/register', methods=['POST'])
-def register():
-    data = request.json
-    if User.query.filter_by(username=data['username']).first():
-        return jsonify({'error': 'User already exists'}), 400
-    new_user = User(username=data['username'], password=data['password'])
-    db.session.add(new_user)
-    db.session.commit()
-    return jsonify({'message': 'Registered successfully'})
 
 # ====================== 文件接口 ======================
 @app.route('/upload', methods=['POST'])
