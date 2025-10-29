@@ -17,22 +17,26 @@ const username = ref('')
 const password = ref('')
 const router = useRouter()
 
+// 登录成功后，存储用户数据
 const login = async () => {
-  try {
-    const res = await request.post('/auth/login', {
-      username: username.value,
-      password: password.value
-    })
+  const res = await request.post('/auth/login', {
+    username: username.value,
+    password: password.value
+  })
+  console.log(res)
+  if (res.token) {
+    // 存储 token 和 user 数据
     localStorage.setItem('token', res.token)
-    localStorage.setItem('user', JSON.stringify(res.user))  // ✅ 存储用户信息
-    alert('登录成功！')
-    router.push('/home')
-  } catch {
-    alert('登录失败，使用默认模拟登录')
-    localStorage.setItem('token', 'mock-token')
-    router.push('/home')
+    localStorage.setItem('user', JSON.stringify({
+      username: res.username,
+      avatar: res.avatar || '默认头像链接'  // 如果没有 avatar，使用默认头像
+    }))
+    router.push('/profile')  // 登录成功后跳转到 Profile 页面
+  } else {
+    alert('登录失败')
   }
 }
+
 </script>
 
 <style scoped>
