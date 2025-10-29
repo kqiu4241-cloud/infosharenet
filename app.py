@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from urllib.parse import unquote, quote
+from flask_migrate import Migrate
 import os
 from sqlalchemy import func
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
@@ -14,7 +15,7 @@ CORS(app)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://infouser:123456@localhost/infoshare'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
-
+migrate = Migrate(app, db)
 # ====================== JWT 配置 ======================
 app.config['JWT_SECRET_KEY'] = 'your-secret-key'
 app.config['JWT_TOKEN_LOCATION'] = ['headers']
@@ -28,7 +29,7 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(64), unique=True)
     password = db.Column(db.String(512))
-
+    avatar = db.Column(db.String(255), default='https://cdn-icons-png.flaticon.com/512/3135/3135715.png')  # 默认头像链接
 class File(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     filename = db.Column(db.String(255))
@@ -57,8 +58,10 @@ def register():
         return jsonify({'error': 'User already exists'}), 400
     # ✅ 密码加密（默认使用 pbkdf2:sha256）
     hashed_password = generate_password_hash(password)
+    # 默认头像
+    default_avatar = 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png'
     # 存入数据库
-    new_user = User(username=username, password=hashed_password)
+    new_user = User(username=username, password=hashed_password,avatar=default_avatar)
     db.session.add(new_user)
     db.session.commit()
     return jsonify({'message': 'Registered successfully'})
@@ -73,9 +76,29 @@ def login():
     # 验证用户存在 + 密码匹配
     if user and check_password_hash(user.password, password):
         token = create_access_token(identity=username)
-        return jsonify({'token': token, 'message': '登录成功'})
+        return jsonify({
+        'token': token, 
+        'message': '登录成功',
+        'username': user.username,
+        'avatar': user.avatar
+        })
     else:
         return jsonify({'message': '用户名或密码错误'}), 401
+
+@app.route('/auth/user', methods=['GET'])
+@jwt_required()  # 需要用户登录
+def get_user_info():
+    current_user = get_jwt_identity()  # 获取当前用户的用户名
+    user = User.query.filter_by(username=current_user).first()
+
+    if user:
+        # 返回用户信息（例如：头像、用户名等）
+        return jsonify({
+            'username': user.username,
+            'avatar': user.avatar  # 如果你添加了头像字段
+        })
+    else:
+        return jsonify({'message': '用户不存在'}), 404
 
 # ====================== 文件接口 ======================
 @app.route('/upload', methods=['POST'])
