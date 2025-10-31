@@ -13,6 +13,31 @@
     </main>
   </div>
 </template>
+<script setup>
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+
+const isLoggedIn = ref(false)
+const router = useRouter()
+
+// 页面加载时检查登录状态
+onMounted(() => {
+  const token = localStorage.getItem('token')
+  if (token) {
+    // 已登录
+    isLoggedIn.value = true
+  }
+})
+
+// 退出登录的操作
+const logout = () => {
+  localStorage.removeItem('token')
+  localStorage.removeItem('user')
+  isLoggedIn.value = false
+  router.push('/login')
+}
+</script>
+
 
 <style>
 body {

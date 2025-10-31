@@ -9,7 +9,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import request from '../api/request'
 import { useRouter } from 'vue-router'
 
@@ -18,6 +18,12 @@ const password = ref('')
 const router = useRouter()
 
 // 登录成功后，存储用户数据
+onMounted(() => {
+  const token = localStorage.getItem('token')
+  if (token) {
+    router.push('/profile')
+  }
+})
 const login = async () => {
   const res = await request.post('/auth/login', {
     username: username.value,
@@ -36,7 +42,7 @@ const login = async () => {
     alert('登录失败')
   }
 }
-
+ 
 </script>
 
 <style scoped>
